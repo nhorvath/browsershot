@@ -31,7 +31,10 @@ class Browsershot
     /** @var string */
     protected $userAgent;
 
-    public function __construct($binPath = '', $width = 640, $height = 480, $quality = 60, $timeout = 5000, $backgroundColor = null, $userAgent = '')
+    /** @var array **/
+    protected $stlesheets;
+
+    public function __construct($binPath = '', $width = 640, $height = 480, $quality = 60, $timeout = 5000, $backgroundColor = null, $userAgent = '', $stylesheets = null)
     {
         if ($binPath === '') {
             $binPath = $this->getBinPath();
@@ -44,7 +47,8 @@ class Browsershot
         $this->backgroundColor = $backgroundColor;
         $this->timeout = $timeout;
         $this->userAgent = $userAgent;
-
+        $this->stylesheets = $stylesheets;
+        
         return $this;
     }
 
@@ -218,6 +222,22 @@ class Browsershot
     }
 
     /**
+     * @param array $stylesheets
+     *
+     * @return $this
+     * @throws \Exception
+     */
+    public function setStylesheets($stylesheets) {
+        if ($stylesheets !== null && !is_array($stylesheets)) {
+            throw new Exception('Stylesheets must be an array of urls, or null');
+        }
+
+        $this->stylesheets = $stylesheets;
+
+        return $this;
+    }
+
+    /**
      * Convert the webpage to an image.
      *
      * @param string $targetFile The path of the file where the screenshot should be saved
@@ -292,27 +312,46 @@ class Browsershot
      */
     protected function getPhantomJsScript($targetFile)
     {
-        return "
+        $script = "
             var page = require('webpage').create();
             {$this->userAgent}
             page.settings.javascriptEnabled = true;
             page.settings.resourceTimeout = ".$this->timeout.';
             page.viewportSize = { width: '.$this->width.', height: '.($this->height == 0 ? 1 : $this->height)." };
-            page.open('{$this->url}', function() {
-                if (".($this->backgroundColor ? 'true' : 'false').") {
+            page.open(".json_encode($this->url).", function() {
+        ";
+        if ($this->stylesheets && is_array($this->stylesheets)) {
+            foreach ($this->stylesheets as $css) {
+                $script .= "
                     page.evaluate(function() {
-                        var style = document.createElement('style'),
-                            text = document.createTextNode('body { background: {$this->backgroundColor} }');
-                        style.setAttribute('type', 'text/css');
-                        style.appendChild(text);
-                        document.head.insertBefore(style, document.head.firstChild);
+                        var style = document.createElement('link');
+                        style.setAttribute('rel', 'stylesheet');
+                        style.setAttribute('language', 'text/css');
+                        style.setAttribute('href', ".json_encode($css).");
+                        document.head.appendChild(style);
                     });
-                }
+                ";
+            }
+        }
+        if ($this->backgroundColor) {
+            $script .= "
+                page.evaluate(function() {
+                    var style = document.createElement('style'),
+                        text = document.createTextNode('body { background: {$this->backgroundColor} }');
+                    style.setAttribute('type', 'text/css');
+                    style.appendChild(text);
+                    document.head.insertBefore(style, document.head.firstChild);
+                });
+            ";
+        }
+        $script .= "
                 window.setTimeout(function(){
                     page.render('{$targetFile}');
                     phantom.exit();
                 }, {$this->timeout});
             });
         ";
+        echo $script;
+        return $script;
     }
 }
